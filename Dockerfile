@@ -13,15 +13,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
-COPY main.py .
+# Copy application source code
+COPY src/ ./src/
 
 # Expose port
 EXPOSE 7777
 
-# Health check - test postcode endpoint with 1 second timeout
-HEALTHCHECK --interval=30s --timeout=1s --start-period=10s --retries=3 \
-    CMD curl -f --max-time 1 http://localhost:7777/postcode/1012AB || exit 1
+# Health check - use /health endpoint for reliability
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f --max-time 2 http://localhost:7777/health || exit 1
 
-# Run with production server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7777"]
+# Run with production server using new src structure
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "7777"]

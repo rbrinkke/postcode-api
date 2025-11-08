@@ -1,5 +1,16 @@
+# Web Framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+
+# Database
 aiosqlite==0.19.0
-pydantic==2.5.3
+
+# Data Validation & Settings
+pydantic==2.12.4
+pydantic-settings==2.11.0
+
+# Logging
 python-json-logger==2.0.7
+
+# Caching
+cachetools==6.2.1
