@@ -13,6 +13,7 @@ from cachetools import TTLCache
 from src.db.connection import DatabasePool
 from src.core.config import settings
 from src.core.logging import trace_id_var
+from src.core.middleware import track_performance
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +94,14 @@ class PostcodeRepository:
         logger.debug("Cache miss - querying database", extra={"postcode": postcode})
 
         try:
-            conn = await DatabasePool.get_connection()
+            async with track_performance("database_query"):
+                conn = await DatabasePool.get_connection()
 
-            async with conn.execute(
-                "SELECT postcode, lat, lon, woonplaats FROM unilabel WHERE postcode = ? LIMIT 1",
-                (postcode,)
-            ) as cursor:
-                row = await cursor.fetchone()
+                async with conn.execute(
+                    "SELECT postcode, lat, lon, woonplaats FROM unilabel WHERE postcode = ? LIMIT 1",
+                    (postcode,)
+                ) as cursor:
+                    row = await cursor.fetchone()
 
             if row:
                 # Build result dictionary

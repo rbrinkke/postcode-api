@@ -26,7 +26,12 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import configuration first
 from src.core.config import settings
 from src.core.logging import setup_logging
-from src.core.middleware import LoggingMiddleware, SecurityHeadersMiddleware, TraceIDMiddleware
+from src.core.middleware import (
+    LoggingMiddleware,
+    SecurityHeadersMiddleware,
+    TraceIDMiddleware,
+    PerformanceMiddleware
+)
 from src.db.connection import DatabasePool
 from src.api.routes import router
 from src.api.debug import debug_router
@@ -110,6 +115,11 @@ if settings.cors_enabled:
         allow_headers=settings.cors_allow_headers,
     )
     logger.info("CORS enabled", extra={"origins": settings.cors_origins})
+
+# Add performance tracking middleware (only in debug mode)
+if settings.debug_mode:
+    app.add_middleware(PerformanceMiddleware, enabled=True)
+    logger.info("Performance tracking enabled")
 
 # Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)

@@ -230,3 +230,114 @@ async def invalidate_postcode(postcode: str):
         "message": f"Cache entry for {postcode} invalidated",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@debug_router.get("/config")
+async def get_configuration():
+    """
+    Get current runtime configuration.
+    
+    Returns all settings with their current values.
+    Useful for verifying configuration in different environments.
+    """
+    if settings.production_mode:
+        raise HTTPException(404, "Not found")
+    
+    return {
+        "database": {
+            "path": settings.db_path,
+            "cache_statements": settings.db_cache_statements
+        },
+        "cache": {
+            "enabled": settings.enable_response_cache,
+            "max_size": settings.cache_max_size,
+            "ttl_seconds": settings.cache_ttl_seconds
+        },
+        "api": {
+            "title": settings.api_title,
+            "version": settings.api_version,
+            "host": settings.api_host,
+            "port": settings.api_port
+        },
+        "cors": {
+            "enabled": settings.cors_enabled,
+            "origins": settings.cors_origins,
+            "allow_credentials": settings.cors_allow_credentials,
+            "allow_methods": settings.cors_allow_methods
+        },
+        "logging": {
+            "level": settings.log_level,
+            "json": settings.log_json,
+            "config_file": settings.log_config_file
+        },
+        "debug": {
+            "debug_mode": settings.debug_mode,
+            "production_mode": settings.production_mode
+        },
+        "health": {
+            "enabled": settings.health_check_enabled
+        }
+    }
+
+
+@debug_router.post("/log-level")
+async def set_log_level(level: str):
+    """
+    Dynamically change log level without restart.
+    
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    
+    Example:
+        POST /debug/log-level?level=DEBUG
+    
+    Returns:
+        Confirmation of log level change
+    """
+    if settings.production_mode:
+        raise HTTPException(404, "Not found")
+    
+    import logging
+    
+    valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    level_upper = level.upper()
+    
+    if level_upper not in valid_levels:
+        raise HTTPException(400, f"Invalid log level. Must be one of: {', '.join(valid_levels)}")
+    
+    # Set log level for our application loggers
+    logging.getLogger("src").setLevel(getattr(logging, level_upper))
+    
+    # Update root logger as well
+    logging.getLogger().setLevel(getattr(logging, level_upper))
+    
+    logger.info(f"Log level changed to {level_upper} via API")
+    
+    return {
+        "status": "success",
+        "log_level": level_upper,
+        "message": f"Log level changed to {level_upper}",
+        "note": "Change is runtime only - restart will reset to config value",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@debug_router.get("/log-level")
+async def get_log_level():
+    """
+    Get current log level.
+    
+    Returns:
+        Current log level for main loggers
+    """
+    if settings.production_mode:
+        raise HTTPException(404, "Not found")
+    
+    import logging
+    
+    return {
+        "root_logger": logging.getLevelName(logging.getLogger().level),
+        "app_logger": logging.getLevelName(logging.getLogger("src").level),
+        "config_default": settings.log_level,
+        "timestamp": datetime.utcnow().isoformat()
+    }
