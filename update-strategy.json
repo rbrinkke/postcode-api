@@ -1,0 +1,32 @@
+{
+  "update_workflow": {
+    "description": "BAG update check and download strategy",
+    
+    "step_0_check_new_version": {
+      "action": "Check if new BAG version is available",
+      "method": "Compare PDOK ATOM feed with saved version",
+      "current_version_file": "/opt/postcode/current-bag-version.json",
+      "pdok_feed": "https://service.pdok.nl/lv/bag/atom/bag.xml",
+      "check_field": "updated timestamp"
+    },
+    
+    "step_1_prepare_bagconv": {
+      "action": "Always get latest bagconv code",
+      "method": "Git clone or pull",
+      "location": "/opt/postcode/bagconv-source/",
+      "repository": "https://github.com/berthubert/bagconv",
+      "build": "cmake . && make"
+    },
+    
+    "step_2_download_zip": {
+      "condition": "Only if new BAG version found",
+      "download_url": "https://service.pdok.nl/lv/bag/atom/downloads/lvbag-extract-nl.zip",
+      "save_to": "/opt/postcode/bagconv-source/lvbag-extract-nl.zip",
+      "size": "~3.5GB",
+      "verification": {
+        "method": "MD5 checksum",
+        "compare_with": "Previous known checksum"
+      }
+    }
+  }
+}

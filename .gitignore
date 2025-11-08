@@ -1,0 +1,53 @@
+# Environment files (keep .env.example, .env.sample, .env.production)
+.env
+.env.local
+!.env.example
+!.env.sample
+!.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+venv/
+env/
+
+# Production database (11 GB - DO NOT COMMIT)
+geodata/bag.sqlite
+
+# Sample database - KEEP THIS (only 16 MB, needed for development)
+!geodata/bag-sample.sqlite
+
+# Database temporary files
+*.sqlite-shm
+*.sqlite-wal
+
+# BAG data files (large downloads - excluded from repo)
+bagconv-source/lvbag-extract-nl.zip
+bagconv-source/*.xml
+bagconv-source/bag.sqlite
+bagconv-source/*.db
+
+# Logs
+*.log
+sample-db-creation.log
+
+# CSV exports (regeneratable with export-postcodes-to-csv.py)
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker-volumes/

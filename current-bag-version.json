@@ -1,0 +1,12 @@
+{
+  "version_date": "2025-07-08T00:00:00Z",
+  "downloads": {
+    "BAG (EPSG:28992) Zip archief": {
+      "url": "https://service.pdok.nl/lv/bag/atom/downloads/lvbag-extract-nl.zip",
+      "size": 3466727976,
+      "type": "application/zip"
+    }
+  },
+  "checked_at": "2025-07-24T16:15:00Z",
+  "note": "Current version from PDOK ATOM feed"
+}

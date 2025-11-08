@@ -1,0 +1,100 @@
+{
+  "implementation_plan": {
+    "description": "BAG update checker implementation plan",
+    
+    "step_1_version_check": {
+      "description": "Check for new BAG version",
+      "actions": [
+        {
+          "action": "fetch_pdok_feed",
+          "url": "https://service.pdok.nl/lv/bag/atom/bag.xml",
+          "extract": "updated timestamp from main feed element"
+        },
+        {
+          "action": "read_download_version",
+          "file": "/opt/postcode/download-bag-version.json",
+          "extract": "version_date field"
+        },
+        {
+          "action": "compare_versions",
+          "logic": "if pdok_date > download_date then new_version_available = true"
+        }
+      ],
+      "output": {
+        "new_version_available": "boolean",
+        "pdok_version_date": "timestamp",
+        "current_download_version": "timestamp"
+      }
+    },
+    
+    "step_2_prepare_bagconv": {
+      "description": "Ensure bagconv repository is up to date",
+      "actions": [
+        {
+          "action": "check_git_repo",
+          "path": "/opt/postcode/bagconv-source/.git",
+          "logic": "if exists then git pull else git clone"
+        },
+        {
+          "action": "git_clone_or_pull",
+          "repository": "https://github.com/berthubert/bagconv.git",
+          "target": "/opt/postcode/bagconv-source/",
+          "command_if_new": "git clone https://github.com/berthubert/bagconv.git .",
+          "command_if_exists": "git pull origin main"
+        }
+      ],
+      "output": {
+        "bagconv_updated": "boolean",
+        "git_commit": "sha hash"
+      }
+    },
+    
+    "step_3_download_zip": {
+      "description": "Download BAG ZIP file if new version available",
+      "condition": "new_version_available == true",
+      "actions": [
+        {
+          "action": "check_disk_space",
+          "required": 7000000000,
+          "path": "/opt/postcode/bagconv-source/"
+        },
+        {
+          "action": "check_existing_file",
+          "path": "/opt/postcode/bagconv-source/lvbag-extract-nl.zip",
+          "logic": "if exists and size matches then skip_download = true"
+        },
+        {
+          "action": "download_file",
+          "condition": "skip_download \!= true",
+          "url": "https://service.pdok.nl/lv/bag/atom/downloads/lvbag-extract-nl.zip",
+          "target": "/opt/postcode/bagconv-source/lvbag-extract-nl.zip",
+          "expected_size": 3466727976,
+          "features": ["progress_bar", "resume_on_failure"]
+        },
+        {
+          "action": "update_download_version",
+          "condition": "download successful",
+          "file": "/opt/postcode/download-bag-version.json",
+          "content": "pdok feed data with download timestamp"
+        }
+      ],
+      "output": {
+        "download_completed": "boolean",
+        "file_path": "/opt/postcode/bagconv-source/lvbag-extract-nl.zip",
+        "file_size": "bytes"
+      }
+    },
+    
+    "error_handling": {
+      "network_errors": "retry with exponential backoff",
+      "disk_space": "fail fast with clear error",
+      "git_errors": "log and continue if possible"
+    },
+    
+    "logging": {
+      "format": "structured json",
+      "levels": ["info", "warning", "error"],
+      "destination": "/var/log/bag-update.log"
+    }
+  }
+}

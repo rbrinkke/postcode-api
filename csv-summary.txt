@@ -1,0 +1,60 @@
+CSV Export Summary
+==================
+
+Generated on: 2025-11-08
+
+Files Created:
+--------------
+
+1. postcodes-sample-summary.csv (56 KB)
+   - One row per postcode
+   - Columns: postcode, woonplaats, lat, lon, address_count
+   - Rows: 1,000 postcodes
+   - Use: Quick postcode lookup, overview of coverage
+
+2. postcodes-sample-detailed.csv (2.9 MB)
+   - One row per address
+   - Columns: postcode, woonplaats, straat, huisnummer, huisletter,
+             huistoevoeging, lat, lon, oppervlakte, gebruiksdoelen,
+             num_status, vbo_status
+   - Rows: 20,532 addresses
+   - Use: Detailed address analysis, full dataset
+
+3. cities-sample.csv (13 KB)
+   - One row per city
+   - Columns: city, postcode_count, address_count, first_postcode, last_postcode
+   - Rows: 417 cities
+   - Use: Geographic distribution, city statistics
+
+Top Cities by Postcode Count:
+------------------------------
+1. Amsterdam      - 71 postcodes, 1,960 addresses
+2. Rotterdam      - 58 postcodes, 1,330 addresses
+3. 's-Gravenhage  - 53 postcodes, 951 addresses
+4. Utrecht        - 52 postcodes, 1,436 addresses
+5. Groningen      - 34 postcodes, 705 addresses
+6. Eindhoven      - 33 postcodes, 769 addresses
+
+Usage Examples:
+---------------
+
+# Import in Python
+import pandas as pd
+df = pd.read_csv('postcodes-sample-summary.csv')
+print(df.head())
+
+# Use in Excel/Google Sheets
+Simply open the CSV file
+
+# Command line analysis
+cat postcodes-sample-summary.csv | grep "Amsterdam" | wc -l
+
+# SQL import
+sqlite3 mydb.sqlite ".import postcodes-sample-summary.csv postcodes"
+
+Notes:
+------
+- All coordinates are in WGS84 (lat/lon)
+- gebruiksdoelen is JSON array format
+- Empty fields are represented as empty strings
+- Character encoding: UTF-8

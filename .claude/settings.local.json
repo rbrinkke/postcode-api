@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker rm:*)",
+      "Bash(ls:*)",
+      "Bash(docker build:*)",
+      "Bash(wait:*)",
+      "Bash(cat:*)",
+      "Bash(DOCKER_BUILDKIT=1 docker build -t postcode-app .)",
+      "Bash(wget:*)",
+      "Bash(chmod:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(docker system:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(sqlite3:*)"
+    ],
+    "deny": []
+  }
+}
