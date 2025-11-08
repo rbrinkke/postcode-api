@@ -6,7 +6,9 @@ Pure ASGI implementation (NOT BaseHTTPMiddleware) for optimal performance.
 
 import logging
 import time
+import uuid
 from starlette.types import ASGIApp, Receive, Scope, Send, Message
+from src.core.logging import trace_id_var
 
 
 class LoggingMiddleware:
@@ -92,6 +94,57 @@ class SecurityHeadersMiddleware:
                 ])
 
                 message["headers"] = headers
+
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+class TraceIDMiddleware:
+    """
+    Middleware for request correlation via Trace IDs.
+
+    Generates a unique trace ID for each request (or uses existing X-Trace-ID header).
+    The trace ID is stored in a context variable and added to all logs.
+    The response includes the X-Trace-ID header for external debugging.
+
+    This enables:
+    - Request tracing across the entire stack
+    - Easy log filtering by trace ID
+    - Distributed tracing support
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.logger = logging.getLogger(__name__)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Handle ASGI request with trace ID"""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Extract or generate trace ID
+        trace_id = None
+        headers = dict(scope.get("headers", []))
+
+        # Check for existing X-Trace-ID header
+        if b"x-trace-id" in headers:
+            trace_id = headers[b"x-trace-id"].decode("utf-8")
+
+        # Generate new trace ID if not provided
+        if not trace_id:
+            trace_id = str(uuid.uuid4())
+
+        # Set trace ID in context variable (for logging)
+        trace_id_var.set(trace_id)
+
+        async def send_wrapper(message: Message) -> None:
+            """Add X-Trace-ID header to response"""
+            if message["type"] == "http.response.start":
+                headers_list = list(message.get("headers", []))
+                headers_list.append((b"x-trace-id", trace_id.encode("utf-8")))
+                message["headers"] = headers_list
 
             await send(message)
 

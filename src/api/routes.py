@@ -6,11 +6,13 @@ error handling with appropriate HTTP status codes.
 """
 
 import logging
+import traceback
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from src.models.responses import PostcodeResponse, HealthResponse, ErrorResponse
 from src.db.repository import repository
 from src.db.connection import DatabasePool
+from src.core.logging import trace_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +103,10 @@ async def get_postcode(postcode: str) -> PostcodeResponse:
     except Exception as e:
         logger.error("Database error during postcode lookup", extra={
             "postcode": postcode,
-            "error": str(e)
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "stack_trace": traceback.format_exc(),
+            "trace_id": trace_id_var.get()
         })
         raise HTTPException(
             status_code=500,
@@ -152,7 +157,12 @@ async def health_check() -> HealthResponse:
         )
 
     except Exception as e:
-        logger.error("Health check failed", extra={"error": str(e)})
+        logger.error("Health check failed", extra={
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "stack_trace": traceback.format_exc(),
+            "trace_id": trace_id_var.get()
+        })
         return JSONResponse(
             status_code=503,
             content={

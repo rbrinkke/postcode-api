@@ -7,10 +7,12 @@ ideal for aggressive caching.
 """
 
 import logging
+import traceback
 from typing import Optional, Dict, Any
 from cachetools import TTLCache
 from src.db.connection import DatabasePool
 from src.core.config import settings
+from src.core.logging import trace_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,10 @@ class PostcodeRepository:
         except Exception as e:
             logger.error("Database query failed", extra={
                 "postcode": postcode,
-                "error": str(e)
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "stack_trace": traceback.format_exc(),
+                "trace_id": trace_id_var.get()
             })
             raise
 

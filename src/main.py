@@ -26,9 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import configuration first
 from src.core.config import settings
 from src.core.logging import setup_logging
-from src.core.middleware import LoggingMiddleware, SecurityHeadersMiddleware
+from src.core.middleware import LoggingMiddleware, SecurityHeadersMiddleware, TraceIDMiddleware
 from src.db.connection import DatabasePool
 from src.api.routes import router
+from src.api.debug import debug_router
 
 # Initialize logging
 logger = setup_logging()
@@ -113,11 +114,22 @@ if settings.cors_enabled:
 # Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
 
+# Add trace ID middleware (for request correlation)
+app.add_middleware(TraceIDMiddleware)
+
 # Add logging middleware
 app.add_middleware(LoggingMiddleware)
 
 # Include API routes
 app.include_router(router)
+
+# Include debug routes (only in development)
+if not settings.production_mode:
+    app.include_router(debug_router)
+    logger.info("Debug endpoints enabled", extra={
+        "debug_mode": settings.debug_mode,
+        "production_mode": settings.production_mode
+    })
 
 # Root endpoint
 @app.get(

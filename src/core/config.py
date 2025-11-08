@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
     log_json: bool = True
+    log_config_file: str = "src/core/log_config.yaml"
+
+    # Debug & Development
+    debug_mode: bool = False  # Enable debug endpoints and features
+    production_mode: bool = False  # Production optimizations (disables debug endpoints)
 
     # Health Check
     health_check_enabled: bool = True
