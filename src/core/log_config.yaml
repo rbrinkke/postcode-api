@@ -1,0 +1,74 @@
+# Logging Configuration for Dutch Postcode API
+# Based on logging.dictConfig specification
+#
+# This config provides:
+# - Granular control per logger (app vs third-party)
+# - Trace ID support for request correlation
+# - JSON output for production
+# - Simple format for development
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  json:
+    (): pythonjsonlogger.jsonlogger.JsonFormatter
+    format: '%(asctime)s %(trace_id)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+  simple:
+    format: '%(asctime)s - [%(trace_id)s] - %(levelname)-8s - %(name)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+filters:
+  trace_id:
+    (): src.core.logging.TraceIDFilter
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: json
+    stream: ext://sys.stdout
+    filters: [trace_id]
+
+  console_simple:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: simple
+    stream: ext://sys.stdout
+    filters: [trace_id]
+
+  error_console:
+    class: logging.StreamHandler
+    level: ERROR
+    formatter: json
+    stream: ext://sys.stderr
+    filters: [trace_id]
+
+loggers:
+  # Our application - DEBUG level for detailed debugging
+  src:
+    level: DEBUG
+    handlers: [console, error_console]
+    propagate: no
+
+  # Third-party libraries - filtered to reduce noise
+  aiosqlite:
+    level: WARNING
+    handlers: [console]
+    propagate: no
+
+  # Uvicorn loggers
+  uvicorn.error:
+    level: INFO
+    handlers: [console]
+    propagate: no
+
+  uvicorn.access:
+    level: CRITICAL  # Disabled (we have custom middleware)
+    propagate: no
+
+root:
+  level: INFO
+  handlers: [console, error_console]
