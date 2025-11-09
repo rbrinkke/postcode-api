@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+LABEL maintainer="Postcode API Team"
+LABEL description="Mock server for Dutch Postcode Geocoding API"
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY mocks/requirements-mocks.txt /app/mocks/requirements-mocks.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r /app/mocks/requirements-mocks.txt
+
+# Copy application code
+COPY mocks/ /app/mocks/
+COPY src/models/ /app/src/models/
+COPY src/__init__.py /app/src/__init__.py
+
+# Create fixtures directory
+RUN mkdir -p /app/mocks/fixtures
+
+# Expose mock server port
+EXPOSE 8888
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+    CMD curl -f http://localhost:8888/health || exit 1
+
+# Run mock server
+CMD ["python", "-m", "uvicorn", "mocks.postcode_mock:app", "--host", "0.0.0.0", "--port", "8888"]

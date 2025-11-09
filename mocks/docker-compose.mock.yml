@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  postcode-mock:
+    build:
+      context: ..
+      dockerfile: mocks/Dockerfile.mock
+    container_name: postcode-mock
+    ports:
+      - "8888:8888"
+    environment:
+      # Server settings
+      - MOCK_PORT=8888
+      - MOCK_HOST=0.0.0.0
+
+      # Behavior settings
+      - MOCK_ENABLE_RESPONSE_DELAY=false
+      - MOCK_MIN_DELAY_MS=10
+      - MOCK_MAX_DELAY_MS=100
+
+      # Error simulation
+      - MOCK_ERROR_SIMULATION_ENABLED=false
+      - MOCK_ERROR_RATE=0.05
+
+      # Data settings
+      - MOCK_DATA_SIZE=500
+      - MOCK_USE_FIXTURES=true
+
+      # Features
+      - MOCK_ENABLE_DEBUG_ENDPOINTS=true
+      - MOCK_ENABLE_STATISTICS=true
+
+      # Logging
+      - MOCK_LOG_LEVEL=INFO
+      - MOCK_LOG_REQUESTS=true
+
+    volumes:
+      # Mount fixtures as read-only
+      - ./fixtures:/app/mocks/fixtures:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    restart: unless-stopped
+
+    networks:
+      - postcode-mock-network
+
+networks:
+  postcode-mock-network:
+    driver: bridge
