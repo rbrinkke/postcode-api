@@ -1,0 +1,26 @@
+[
+  {
+    "description": "Edge case: Lowest valid postcode number",
+    "postcode": "1000AA",
+    "lat": 52.370, "lon": 4.895,
+    "woonplaats": "Amsterdam"
+  },
+  {
+    "description": "Edge case: High postcode number",
+    "postcode": "9999ZZ",
+    "lat": 53.220, "lon": 6.565,
+    "woonplaats": "Groningen"
+  },
+  {
+    "description": "Test postcode for validation",
+    "postcode": "1234AB",
+    "lat": 52.500, "lon": 5.000,
+    "woonplaats": "Test City"
+  },
+  {
+    "description": "Test postcode for error simulation",
+    "postcode": "9999AA",
+    "lat": 53.000, "lon": 6.000,
+    "woonplaats": "Error Test"
+  }
+]
