@@ -6,16 +6,16 @@ for optimal performance. Postcode data is relatively static, making it
 ideal for aggressive caching.
 """
 
-import logging
 import traceback
 from typing import Optional, Dict, Any
 from cachetools import TTLCache
 from src.db.connection import DatabasePool
 from src.core.config import settings
-from src.core.logging import trace_id_var
 from src.core.middleware import track_performance
+from src.core.logging_config import get_logger
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class PostcodeRepository:
@@ -55,13 +55,10 @@ class PostcodeRepository:
         # Initialize cache
         if self.cache_enabled:
             self._cache = TTLCache(maxsize=self.cache_size, ttl=self.cache_ttl)
-            logger.info("Response cache enabled", extra={
-                "max_size": self.cache_size,
-                "ttl_seconds": self.cache_ttl
-            })
+            logger.info("response_cache_enabled", max_size=self.cache_size, ttl_seconds=self.cache_ttl)
         else:
             self._cache = None
-            logger.info("Response cache disabled")
+            logger.info("response_cache_disabled")
 
         # Cache statistics
         self._cache_hits = 0
@@ -86,12 +83,12 @@ class PostcodeRepository:
         # Check cache first
         if self.cache_enabled and postcode in self._cache:
             self._cache_hits += 1
-            logger.debug("Cache hit", extra={"postcode": postcode})
+            logger.debug("cache_hit", postcode=postcode)
             return self._cache[postcode]
 
         # Cache miss - query database
         self._cache_misses += 1
-        logger.debug("Cache miss - querying database", extra={"postcode": postcode})
+        logger.debug("cache_miss", postcode=postcode)
 
         try:
             async with track_performance("database_query"):
@@ -115,20 +112,20 @@ class PostcodeRepository:
                 # Store in cache
                 if self.cache_enabled:
                     self._cache[postcode] = result
-                    logger.debug("Cached postcode", extra={"postcode": postcode})
+                    logger.debug("postcode_cached", postcode=postcode)
 
                 return result
 
             return None
 
         except Exception as e:
-            logger.error("Database query failed", extra={
-                "postcode": postcode,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "stack_trace": traceback.format_exc(),
-                "trace_id": trace_id_var.get()
-            })
+            logger.error(
+                "database_query_failed",
+                postcode=postcode,
+                error=str(e),
+                error_type=type(e).__name__,
+                stack_trace=traceback.format_exc()
+            )
             raise
 
     def get_cache_stats(self) -> Dict[str, Any]:
@@ -169,7 +166,7 @@ class PostcodeRepository:
         """Clear all cached entries"""
         if self.cache_enabled and self._cache:
             self._cache.clear()
-            logger.info("Cache cleared")
+            logger.info("cache_cleared")
 
     def invalidate_postcode(self, postcode: str) -> None:
         """
@@ -180,7 +177,7 @@ class PostcodeRepository:
         """
         if self.cache_enabled and postcode in self._cache:
             del self._cache[postcode]
-            logger.info("Cache entry invalidated", extra={"postcode": postcode})
+            logger.info("cache_entry_invalidated", postcode=postcode)
 
 
 # Global repository instance

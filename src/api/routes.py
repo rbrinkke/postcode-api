@@ -5,16 +5,15 @@ All endpoints are documented with OpenAPI schemas and include proper
 error handling with appropriate HTTP status codes.
 """
 
-import logging
 import traceback
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from src.models.responses import PostcodeResponse, HealthResponse, ErrorResponse
 from src.db.repository import repository
 from src.db.connection import DatabasePool
-from src.core.logging import trace_id_var
+from src.core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Create API router
 router = APIRouter()
@@ -72,7 +71,7 @@ async def get_postcode(postcode: str) -> PostcodeResponse:
 
     # Validate postcode format
     if len(postcode) != 6 or not (postcode[:4].isdigit() and postcode[4:].isalpha()):
-        logger.warning("Invalid postcode format", extra={"postcode": postcode})
+        logger.warning("invalid_postcode_format", postcode=postcode)
         raise HTTPException(
             status_code=400,
             detail=f"Invalid postcode format: {postcode}. Expected format: 1234AB (4 digits + 2 letters)"
@@ -83,16 +82,17 @@ async def get_postcode(postcode: str) -> PostcodeResponse:
         result = await repository.get_postcode(postcode)
 
         if not result:
-            logger.info("Postcode not found", extra={"postcode": postcode})
+            logger.info("postcode_not_found", postcode=postcode)
             raise HTTPException(
                 status_code=404,
                 detail=f"Postcode {postcode} not found in database"
             )
 
-        logger.info("Postcode lookup successful", extra={
-            "postcode": postcode,
-            "woonplaats": result["woonplaats"]
-        })
+        logger.info(
+            "postcode_lookup_successful",
+            postcode=postcode,
+            woonplaats=result["woonplaats"]
+        )
 
         return PostcodeResponse(**result)
 
@@ -101,13 +101,13 @@ async def get_postcode(postcode: str) -> PostcodeResponse:
         raise
 
     except Exception as e:
-        logger.error("Database error during postcode lookup", extra={
-            "postcode": postcode,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "stack_trace": traceback.format_exc(),
-            "trace_id": trace_id_var.get()
-        })
+        logger.error(
+            "database_error_postcode_lookup",
+            postcode=postcode,
+            error=str(e),
+            error_type=type(e).__name__,
+            stack_trace=traceback.format_exc()
+        )
         raise HTTPException(
             status_code=500,
             detail="Internal server error occurred"
@@ -157,12 +157,12 @@ async def health_check() -> HealthResponse:
         )
 
     except Exception as e:
-        logger.error("Health check failed", extra={
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "stack_trace": traceback.format_exc(),
-            "trace_id": trace_id_var.get()
-        })
+        logger.error(
+            "health_check_exception",
+            error=str(e),
+            error_type=type(e).__name__,
+            stack_trace=traceback.format_exc()
+        )
         return JSONResponse(
             status_code=503,
             content={

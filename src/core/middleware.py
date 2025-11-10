@@ -4,12 +4,12 @@ Custom ASGI middleware for logging and performance tracking.
 Pure ASGI implementation (NOT BaseHTTPMiddleware) for optimal performance.
 """
 
-import logging
 import time
 import uuid
 from contextvars import ContextVar
 from starlette.types import ASGIApp, Receive, Scope, Send, Message
-from src.core.logging import trace_id_var
+from src.core.logging_config import get_logger
+import structlog
 
 # Context variable for performance timing
 perf_context: ContextVar[dict] = ContextVar('perf_context', default=None)
@@ -25,7 +25,7 @@ class LoggingMiddleware:
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Handle ASGI request"""
@@ -42,11 +42,8 @@ class LoggingMiddleware:
         is_health_check = path in ["/health", "/health/live", "/health/ready"]
 
         if not is_health_check:
-            self.logger.info("Request started", extra={
-                "method": method,
-                "path": path,
-                "client": scope.get("client", ["unknown"])[0] if scope.get("client") else "unknown"
-            })
+            client_ip = scope.get("client", ["unknown"])[0] if scope.get("client") else "unknown"
+            self.logger.info("request_started", method=method, path=path, client=client_ip)
 
         async def send_wrapper(message: Message) -> None:
             """Wrap send to capture response status and timing"""
@@ -55,12 +52,13 @@ class LoggingMiddleware:
                 status_code = message.get("status", 0)
 
                 if not is_health_check:
-                    self.logger.info("Request completed", extra={
-                        "method": method,
-                        "path": path,
-                        "status_code": status_code,
-                        "process_time_ms": round(process_time * 1000, 2)
-                    })
+                    self.logger.info(
+                        "request_completed",
+                        method=method,
+                        path=path,
+                        status_code=status_code,
+                        process_time_ms=round(process_time * 1000, 2)
+                    )
 
             await send(message)
 
@@ -109,7 +107,7 @@ class TraceIDMiddleware:
     Middleware for request correlation via Trace IDs.
 
     Generates a unique trace ID for each request (or uses existing X-Trace-ID header).
-    The trace ID is stored in a context variable and added to all logs.
+    The trace ID is stored in structlog context and added to all logs.
     The response includes the X-Trace-ID header for external debugging.
 
     This enables:
@@ -120,7 +118,7 @@ class TraceIDMiddleware:
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Handle ASGI request with trace ID"""
@@ -132,46 +130,56 @@ class TraceIDMiddleware:
         trace_id = None
         headers = dict(scope.get("headers", []))
 
-        # Check for existing X-Trace-ID header
+        # Check for existing X-Trace-ID header (or X-Correlation-ID)
         if b"x-trace-id" in headers:
             trace_id = headers[b"x-trace-id"].decode("utf-8")
+        elif b"x-correlation-id" in headers:
+            trace_id = headers[b"x-correlation-id"].decode("utf-8")
 
         # Generate new trace ID if not provided
         if not trace_id:
             trace_id = str(uuid.uuid4())
 
-        # Set trace ID in context variable (for logging)
-        trace_id_var.set(trace_id)
+        # Set trace ID in structlog context (for logging)
+        structlog.contextvars.bind_contextvars(
+            trace_id=trace_id,
+            correlation_id=trace_id
+        )
 
         async def send_wrapper(message: Message) -> None:
             """Add X-Trace-ID header to response"""
             if message["type"] == "http.response.start":
                 headers_list = list(message.get("headers", []))
                 headers_list.append((b"x-trace-id", trace_id.encode("utf-8")))
+                headers_list.append((b"x-correlation-id", trace_id.encode("utf-8")))
                 message["headers"] = headers_list
 
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # Clear context after request
+            structlog.contextvars.clear_contextvars()
 
 
 class PerformanceMiddleware:
     """
     Middleware for detailed performance breakdown tracking.
-    
+
     Tracks time spent in different components:
     - Middleware overhead
     - Route handler execution
     - Database queries (via repository)
-    
+
     Performance data is stored in context variable and logged with request completion.
     Only enabled when debug_mode=True for minimal production overhead.
     """
-    
+
     def __init__(self, app: ASGIApp, enabled: bool = True) -> None:
         self.app = app
         self.enabled = enabled
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
     
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Track request performance"""
@@ -198,12 +206,12 @@ class PerformanceMiddleware:
                 # Log performance breakdown if path is not health check
                 path = scope.get("path", "")
                 if path not in ["/health", "/health/live", "/health/ready"]:
-                    self.logger.debug("Performance breakdown", extra={
-                        "path": path,
-                        "total_ms": round(total_time * 1000, 2),
-                        "timings": perf_data.get("timings", []),
-                        "trace_id": trace_id_var.get()
-                    })
+                    self.logger.debug(
+                        "performance_breakdown",
+                        path=path,
+                        total_ms=round(total_time * 1000, 2),
+                        timings=perf_data.get("timings", [])
+                    )
             
             await send(message)
         

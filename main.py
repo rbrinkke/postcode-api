@@ -1,7 +1,7 @@
-import logging
 import os
 import sys
 import time
+import uuid
 import aiosqlite
 import psutil
 from collections import deque
@@ -13,34 +13,17 @@ from statistics import mean, median
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
-from pythonjsonlogger import jsonlogger
 from starlette.types import ASGIApp, Receive, Scope, Send, Message
+import structlog
 
-# Configure structured JSON logging
-def setup_logging():
-    formatter = jsonlogger.JsonFormatter(
-        fmt='%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    
-    # Remove existing handlers
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Console handler for Docker
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-    
-    # Suppress uvicorn access logs (we'll use our own middleware)
-    logging.getLogger("uvicorn.access").disabled = True
-    
-    return logging.getLogger(__name__)
+# Import logging configuration
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.core.logging_config import setup_logging, get_logger
+from src.core.config import settings
 
-logger = setup_logging()
+# Initialize logging system
+setup_logging(debug=settings.is_debug_mode, json_logs=settings.use_json_logs)
+logger = get_logger(__name__)
 
 # Metrics Collector - tracks all system and application metrics
 class MetricsCollector:
@@ -225,14 +208,14 @@ class PostcodeResponse(BaseModel):
     lon: float = Field(..., description="Longitude in WGS84") 
     woonplaats: str = Field(..., description="City/town name")
 
-# Database configuration (can be overridden with DB_PATH environment variable)
-DB_PATH = os.getenv("DB_PATH", "/opt/postcode/geodata/bag.sqlite")
+# Database configuration (use settings from config)
+DB_PATH = settings.get_db_path_for_env()
 
-# Pure ASGI middleware for logging (NOT BaseHTTPMiddleware!)
+# Pure ASGI middleware for logging with correlation IDs (NOT BaseHTTPMiddleware!)
 class LoggingMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -244,14 +227,22 @@ class LoggingMiddleware:
         method = scope.get("method", "")
         status_code = 0
 
+        # Generate or extract correlation ID
+        headers = dict(scope.get("headers", []))
+        correlation_id = headers.get(b"x-correlation-id", b"").decode() or str(uuid.uuid4())
+
+        # Bind correlation ID to context for all logs in this request
+        structlog.contextvars.bind_contextvars(
+            correlation_id=correlation_id,
+            request_method=method,
+            request_path=path
+        )
+
         # Skip logging for health checks and dashboard auto-refresh
         should_log = path not in ["/health", "/api/metrics"]
 
         if should_log:
-            self.logger.info("Request started", extra={
-                "method": method,
-                "path": path
-            })
+            self.logger.info("request_started", method=method, path=path)
 
         async def send_wrapper(message: Message) -> None:
             nonlocal status_code
@@ -260,13 +251,19 @@ class LoggingMiddleware:
                 process_time = time.time() - start_time
                 process_time_ms = round(process_time * 1000, 2)
 
+                # Add correlation ID to response headers
+                headers_list = list(message.get("headers", []))
+                headers_list.append((b"x-correlation-id", correlation_id.encode()))
+                message["headers"] = headers_list
+
                 if should_log:
-                    self.logger.info("Request completed", extra={
-                        "method": method,
-                        "path": path,
-                        "status_code": status_code,
-                        "process_time_ms": process_time_ms
-                    })
+                    self.logger.info(
+                        "request_completed",
+                        method=method,
+                        path=path,
+                        status_code=status_code,
+                        process_time_ms=process_time_ms
+                    )
 
                 # Record metrics for all requests (including health/metrics)
                 # Extract postcode from path if present
@@ -284,26 +281,30 @@ class LoggingMiddleware:
 
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # Clear context after request
+            structlog.contextvars.clear_contextvars()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    logger.info("Starting postcode API", extra={"db_path": DB_PATH})
-    
+    logger.info("application_startup", db_path=DB_PATH)
+
     # Test database connection
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT COUNT(*) FROM nums") as cursor:
                 count = await cursor.fetchone()
-                logger.info("Database connected", extra={"address_count": count[0]})
+                logger.info("database_connected", address_count=count[0], db_path=DB_PATH)
     except Exception as e:
-        logger.error("Database connection failed", extra={"error": str(e)})
+        logger.error("database_connection_failed", error=str(e), db_path=DB_PATH)
         raise
-    
+
     yield
-    
-    logger.info("Shutting down postcode API")
+
+    logger.info("application_shutdown")
 
 # Create FastAPI app
 app = FastAPI(
@@ -324,7 +325,7 @@ async def health_check():
             await db.execute("SELECT 1")
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
-        logger.error("Health check failed", extra={"error": str(e)})
+        logger.error("health_check_failed", error=str(e), db_path=DB_PATH)
         return JSONResponse(
             status_code=503,
             content={"status": "unhealthy", "database": "disconnected", "error": str(e)}
@@ -334,20 +335,20 @@ async def health_check():
 async def get_postcode(postcode: str):
     """
     Get GPS coordinates and city for a Dutch postcode
-    
+
     - **postcode**: Dutch postcode without spaces (e.g., 1012AB)
     """
     # Normalize postcode: uppercase, no spaces
     postcode = postcode.upper().strip().replace(" ", "")
-    
+
     # Basic validation
     if len(postcode) != 6 or not (postcode[:4].isdigit() and postcode[4:].isalpha()):
-        logger.warning("Invalid postcode format", extra={"postcode": postcode})
+        logger.warning("invalid_postcode_format", postcode=postcode)
         raise HTTPException(
             status_code=400,
             detail=f"Invalid postcode format: {postcode}. Expected format: 1234AB"
         )
-    
+
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
@@ -355,30 +356,31 @@ async def get_postcode(postcode: str):
                 (postcode,)
             ) as cursor:
                 row = await cursor.fetchone()
-                
+
                 if not row:
-                    logger.info("Postcode not found", extra={"postcode": postcode})
+                    logger.info("postcode_not_found", postcode=postcode)
                     raise HTTPException(
                         status_code=404,
                         detail=f"Postcode {postcode} not found in database"
                     )
-                
-                logger.info("Postcode found", extra={
-                    "postcode": postcode,
-                    "lat": row[1],
-                    "lon": row[2],
-                    "woonplaats": row[3]
-                })
-                
+
+                logger.info(
+                    "postcode_lookup_success",
+                    postcode=postcode,
+                    lat=row[1],
+                    lon=row[2],
+                    woonplaats=row[3]
+                )
+
                 return PostcodeResponse(
                     postcode=row[0],
                     lat=row[1],
                     lon=row[2],
                     woonplaats=row[3]
                 )
-                
+
     except aiosqlite.Error as e:
-        logger.error("Database error", extra={"error": str(e), "postcode": postcode})
+        logger.error("database_query_error", error=str(e), postcode=postcode)
         raise HTTPException(
             status_code=500,
             detail="Database error occurred"
@@ -424,7 +426,7 @@ async def get_db_stats():
 
             return stats
     except Exception as e:
-        logger.error("Failed to get database stats", extra={"error": str(e)})
+        logger.error("database_stats_error", error=str(e), db_path=DB_PATH)
         return {"error": str(e)}
 
 @app.get("/dashboard", response_class=HTMLResponse)
