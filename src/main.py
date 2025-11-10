@@ -18,14 +18,13 @@ Architecture:
 - Fully typed with Pydantic
 """
 
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import configuration first
 from src.core.config import settings
-from src.core.logging import setup_logging
+from src.core.logging_config import setup_logging, get_logger
 from src.core.middleware import (
     LoggingMiddleware,
     SecurityHeadersMiddleware,
@@ -36,8 +35,9 @@ from src.db.connection import DatabasePool
 from src.api.routes import router
 from src.api.debug import debug_router
 
-# Initialize logging
-logger = setup_logging()
+# Initialize logging system
+setup_logging(debug=settings.is_debug_mode, json_logs=settings.use_json_logs)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -56,12 +56,13 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("=" * 60)
-    logger.info("Starting Dutch Postcode API", extra={
-        "version": settings.api_version,
-        "cache_enabled": settings.enable_response_cache,
-        "cache_size": settings.cache_max_size,
-        "db_path": settings.get_db_path_for_env()
-    })
+    logger.info(
+        "application_starting",
+        version=settings.api_version,
+        cache_enabled=settings.enable_response_cache,
+        cache_size=settings.cache_max_size,
+        db_path=settings.get_db_path_for_env()
+    )
 
     try:
         # Initialize database pool
@@ -71,25 +72,25 @@ async def lifespan(app: FastAPI):
             cache_size=settings.db_cache_statements
         )
 
-        logger.info("Application startup complete")
+        logger.info("application_startup_complete")
         logger.info("=" * 60)
 
     except Exception as e:
-        logger.error("Failed to start application", extra={"error": str(e)})
+        logger.error("application_startup_failed", error=str(e))
         raise
 
     yield
 
     # Shutdown
     logger.info("=" * 60)
-    logger.info("Shutting down Dutch Postcode API")
+    logger.info("application_shutting_down")
 
     try:
         await DatabasePool.close()
-        logger.info("Application shutdown complete")
+        logger.info("application_shutdown_complete")
 
     except Exception as e:
-        logger.error("Error during shutdown", extra={"error": str(e)})
+        logger.error("application_shutdown_error", error=str(e))
 
     logger.info("=" * 60)
 
@@ -114,12 +115,12 @@ if settings.cors_enabled:
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
     )
-    logger.info("CORS enabled", extra={"origins": settings.cors_origins})
+    logger.info("cors_enabled", origins=settings.cors_origins)
 
 # Add performance tracking middleware (only in debug mode)
 if settings.debug_mode:
     app.add_middleware(PerformanceMiddleware, enabled=True)
-    logger.info("Performance tracking enabled")
+    logger.info("performance_tracking_enabled")
 
 # Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
@@ -136,10 +137,11 @@ app.include_router(router)
 # Include debug routes (only in development)
 if not settings.production_mode:
     app.include_router(debug_router)
-    logger.info("Debug endpoints enabled", extra={
-        "debug_mode": settings.debug_mode,
-        "production_mode": settings.production_mode
-    })
+    logger.info(
+        "debug_endpoints_enabled",
+        debug_mode=settings.debug_mode,
+        production_mode=settings.production_mode
+    )
 
 # Root endpoint
 @app.get(
@@ -168,7 +170,7 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting development server")
+    logger.info("development_server_starting", host=settings.api_host, port=settings.api_port)
 
     uvicorn.run(
         "src.main:app",

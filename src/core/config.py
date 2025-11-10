@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     cors_allow_headers: List[str] = ["*"]
 
     # Logging Configuration
-    log_level: str = "INFO"
-    log_json: bool = True
-    log_config_file: str = "src/core/log_config.yaml"
+    log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_json: bool = True    # JSON logs (prod) vs pretty console (dev)
+    debug: bool = False      # Enable debug mode features
 
     # Debug & Development
     debug_mode: bool = False  # Enable debug endpoints and features
@@ -58,6 +58,27 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore"
     )
+
+    @property
+    def is_debug_mode(self) -> bool:
+        """
+        Check if debug mode is enabled.
+
+        Debug mode is enabled when either debug=True or log_level=DEBUG.
+        """
+        return self.debug or self.log_level.upper() == "DEBUG"
+
+    @property
+    def use_json_logs(self) -> bool:
+        """
+        Determine whether to use JSON logs.
+
+        In debug mode: respects log_json setting (allows override)
+        In production: always uses JSON logs
+        """
+        if self.debug:
+            return self.log_json  # Allow override in dev
+        return True  # Always JSON in production
 
     def get_db_path_for_env(self) -> str:
         """

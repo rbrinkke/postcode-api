@@ -5,12 +5,12 @@ Singleton pattern for efficient SQLite connection reuse across requests.
 This significantly improves performance by avoiding connection overhead.
 """
 
-import logging
 import aiosqlite
 from typing import Optional
 from src.core.config import settings
+from src.core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DatabasePool:
@@ -40,14 +40,11 @@ class DatabasePool:
             RuntimeError: If database file doesn't exist or connection fails
         """
         if cls._connection is not None:
-            logger.warning("Database pool already initialized, skipping")
+            logger.warning("database_pool_already_initialized")
             return
 
         cls._db_path = db_path
-        logger.info(f"Initializing database connection pool", extra={
-            "db_path": db_path,
-            "cache_size": cache_size
-        })
+        logger.info("database_pool_initializing", db_path=db_path, cache_size=cache_size)
 
         try:
             # Create connection with optimizations
@@ -65,15 +62,10 @@ class DatabasePool:
                 result = await cursor.fetchone()
                 address_count = result[0] if result else 0
 
-            logger.info("Database pool initialized successfully", extra={
-                "address_count": address_count
-            })
+            logger.info("database_pool_initialized", address_count=address_count, db_path=db_path)
 
         except Exception as e:
-            logger.error(f"Failed to initialize database pool", extra={
-                "error": str(e),
-                "db_path": db_path
-            })
+            logger.error("database_pool_initialization_failed", error=str(e), db_path=db_path)
             cls._connection = None
             raise RuntimeError(f"Database initialization failed: {e}")
 
@@ -102,12 +94,12 @@ class DatabasePool:
         Should be called during application shutdown.
         """
         if cls._connection is not None:
-            logger.info("Closing database connection pool")
+            logger.info("database_pool_closing")
             await cls._connection.close()
             cls._connection = None
             cls._db_path = None
         else:
-            logger.warning("Database pool already closed or never initialized")
+            logger.warning("database_pool_already_closed")
 
     @classmethod
     def is_initialized(cls) -> bool:
@@ -131,5 +123,5 @@ class DatabasePool:
             return True
 
         except Exception as e:
-            logger.error("Database health check failed", extra={"error": str(e)})
+            logger.error("database_health_check_failed", error=str(e))
             return False
