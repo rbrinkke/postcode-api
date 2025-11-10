@@ -15,6 +15,13 @@ from src.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Import Prometheus metrics (gracefully handle if not available)
+try:
+    from src.core.metrics import postcode_lookups_total
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
+
 # Create API router
 router = APIRouter()
 
@@ -72,6 +79,11 @@ async def get_postcode(postcode: str) -> PostcodeResponse:
     # Validate postcode format
     if len(postcode) != 6 or not (postcode[:4].isdigit() and postcode[4:].isalpha()):
         logger.warning("invalid_postcode_format", postcode=postcode)
+
+        # Record invalid format metric
+        if METRICS_AVAILABLE:
+            postcode_lookups_total.labels(result="invalid_format").inc()
+
         raise HTTPException(
             status_code=400,
             detail=f"Invalid postcode format: {postcode}. Expected format: 1234AB (4 digits + 2 letters)"

@@ -14,6 +14,17 @@ import structlog
 # Context variable for performance timing
 perf_context: ContextVar[dict] = ContextVar('perf_context', default=None)
 
+# Import Prometheus metrics (gracefully handle if not available)
+try:
+    from src.core.metrics import (
+        http_requests_total,
+        http_request_duration_seconds,
+        normalize_endpoint
+    )
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
+
 
 class LoggingMiddleware:
     """
@@ -59,6 +70,19 @@ class LoggingMiddleware:
                         status_code=status_code,
                         process_time_ms=round(process_time * 1000, 2)
                     )
+
+                # Record Prometheus metrics (skip health checks and /metrics endpoint)
+                if METRICS_AVAILABLE and not is_health_check and path != "/metrics":
+                    endpoint = normalize_endpoint(path)
+                    http_requests_total.labels(
+                        method=method,
+                        endpoint=endpoint,
+                        status=str(status_code)
+                    ).inc()
+                    http_request_duration_seconds.labels(
+                        method=method,
+                        endpoint=endpoint
+                    ).observe(process_time)
 
             await send(message)
 

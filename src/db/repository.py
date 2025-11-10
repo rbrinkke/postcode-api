@@ -7,6 +7,7 @@ ideal for aggressive caching.
 """
 
 import traceback
+import time
 from typing import Optional, Dict, Any
 from cachetools import TTLCache
 from src.db.connection import DatabasePool
@@ -16,6 +17,21 @@ from src.core.logging_config import get_logger
 import structlog
 
 logger = get_logger(__name__)
+
+# Import Prometheus metrics (gracefully handle if not available)
+try:
+    from src.core.metrics import (
+        cache_operations_total,
+        cache_hit_ratio,
+        cache_size_current,
+        database_queries_total,
+        database_query_duration_seconds,
+        postcode_lookups_total,
+        postcode_lookup_duration_seconds
+    )
+    METRICS_AVAILABLE = True
+except ImportError:
+    METRICS_AVAILABLE = False
 
 
 class PostcodeRepository:
@@ -80,17 +96,38 @@ class PostcodeRepository:
                 "woonplaats": "Utrecht"
             }
         """
+        # Track total lookup time
+        lookup_start = time.time()
+
         # Check cache first
         if self.cache_enabled and postcode in self._cache:
             self._cache_hits += 1
             logger.debug("cache_hit", postcode=postcode)
+
+            # Record cache hit metric
+            if METRICS_AVAILABLE:
+                cache_operations_total.labels(operation="hit").inc()
+
+            # Record successful lookup duration
+            lookup_duration = time.time() - lookup_start
+            if METRICS_AVAILABLE:
+                postcode_lookups_total.labels(result="found").inc()
+                postcode_lookup_duration_seconds.labels(result="found").observe(lookup_duration)
+
             return self._cache[postcode]
 
         # Cache miss - query database
         self._cache_misses += 1
         logger.debug("cache_miss", postcode=postcode)
 
+        # Record cache miss metric
+        if METRICS_AVAILABLE:
+            cache_operations_total.labels(operation="miss").inc()
+
         try:
+            # Track database query time
+            db_start = time.time()
+
             async with track_performance("database_query"):
                 conn = await DatabasePool.get_connection()
 
@@ -99,6 +136,13 @@ class PostcodeRepository:
                     (postcode,)
                 ) as cursor:
                     row = await cursor.fetchone()
+
+            db_duration = time.time() - db_start
+
+            # Record database query metrics
+            if METRICS_AVAILABLE:
+                database_queries_total.labels(operation="postcode_lookup", status="success").inc()
+                database_query_duration_seconds.labels(operation="postcode_lookup").observe(db_duration)
 
             if row:
                 # Build result dictionary
@@ -114,11 +158,31 @@ class PostcodeRepository:
                     self._cache[postcode] = result
                     logger.debug("postcode_cached", postcode=postcode)
 
+                    # Update cache size metric
+                    if METRICS_AVAILABLE:
+                        cache_size_current.set(len(self._cache))
+
+                # Record successful lookup duration
+                lookup_duration = time.time() - lookup_start
+                if METRICS_AVAILABLE:
+                    postcode_lookups_total.labels(result="found").inc()
+                    postcode_lookup_duration_seconds.labels(result="found").observe(lookup_duration)
+
                 return result
+
+            # Postcode not found
+            lookup_duration = time.time() - lookup_start
+            if METRICS_AVAILABLE:
+                postcode_lookups_total.labels(result="not_found").inc()
+                postcode_lookup_duration_seconds.labels(result="not_found").observe(lookup_duration)
 
             return None
 
         except Exception as e:
+            # Record database error metric
+            if METRICS_AVAILABLE:
+                database_queries_total.labels(operation="postcode_lookup", status="error").inc()
+
             logger.error(
                 "database_query_failed",
                 postcode=postcode,
@@ -159,6 +223,10 @@ class PostcodeRepository:
                 "max_size": self.cache_size,
                 "ttl_seconds": self.cache_ttl
             })
+
+        # Update Prometheus cache hit ratio gauge
+        if METRICS_AVAILABLE:
+            cache_hit_ratio.set(hit_rate)
 
         return stats
 

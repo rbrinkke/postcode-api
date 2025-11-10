@@ -7,11 +7,11 @@ services:
       - "0.0.0.0:8005:7777"
     volumes:
       - type: bind
-        source: /opt/postcode/geodata/bag.sqlite
-        target: /opt/postcode/geodata/bag.sqlite
-        read_only: true
+        source: ./geodata
+        target: /app/geodata
     environment:
       - PYTHONUNBUFFERED=1
+      - DB_PATH=/app/geodata/bag-sample.sqlite
 
     # Observability Stack Integration
     labels:

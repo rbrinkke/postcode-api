@@ -34,6 +34,7 @@ from src.core.middleware import (
 from src.db.connection import DatabasePool
 from src.api.routes import router
 from src.api.debug import debug_router
+from src.api.metrics_endpoint import metrics_router
 
 # Initialize logging system
 setup_logging(debug=settings.is_debug_mode, json_logs=settings.use_json_logs)
@@ -71,6 +72,15 @@ async def lifespan(app: FastAPI):
             db_path=db_path,
             cache_size=settings.db_cache_statements
         )
+
+        # Initialize Prometheus metrics
+        try:
+            from src.core.metrics import set_app_info, initialize_static_metrics
+            set_app_info(version=settings.api_version, environment="production" if settings.production_mode else "development")
+            initialize_static_metrics(cache_max_size=settings.cache_max_size)
+            logger.info("prometheus_metrics_initialized")
+        except Exception as e:
+            logger.warning("prometheus_metrics_initialization_failed", error=str(e))
 
         logger.info("application_startup_complete")
         logger.info("=" * 60)
@@ -133,6 +143,9 @@ app.add_middleware(LoggingMiddleware)
 
 # Include API routes
 app.include_router(router)
+
+# Include metrics endpoint (for Prometheus scraping)
+app.include_router(metrics_router)
 
 # Include debug routes (only in development)
 if not settings.production_mode:
