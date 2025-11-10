@@ -5,7 +5,6 @@ These endpoints provide runtime diagnostics, cache statistics, and system info.
 IMPORTANT: Only available when debug_mode=True or production_mode=False.
 """
 
-import logging
 import sys
 import time
 from datetime import datetime
@@ -13,8 +12,9 @@ from fastapi import APIRouter, HTTPException
 from src.core.config import settings
 from src.db.repository import repository
 from src.db.connection import DatabasePool
+from src.core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Create debug router (conditionally enabled)
 debug_router = APIRouter(
@@ -197,7 +197,7 @@ async def clear_cache():
         raise HTTPException(404, "Not found")
 
     repository.clear_cache()
-    logger.info("Cache cleared via debug endpoint")
+    logger.info("cache_cleared_via_debug_endpoint")
 
     return {
         "status": "success",
@@ -222,7 +222,7 @@ async def invalidate_postcode(postcode: str):
 
     postcode = postcode.upper().strip().replace(" ", "")
     repository.invalidate_postcode(postcode)
-    logger.info(f"Invalidated cache for postcode: {postcode}")
+    logger.info("cache_invalidated_via_debug", postcode=postcode)
 
     return {
         "status": "success",
@@ -296,23 +296,23 @@ async def set_log_level(level: str):
     """
     if settings.production_mode:
         raise HTTPException(404, "Not found")
-    
+
     import logging
-    
+
     valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     level_upper = level.upper()
-    
+
     if level_upper not in valid_levels:
         raise HTTPException(400, f"Invalid log level. Must be one of: {', '.join(valid_levels)}")
-    
+
     # Set log level for our application loggers
     logging.getLogger("src").setLevel(getattr(logging, level_upper))
-    
+
     # Update root logger as well
     logging.getLogger().setLevel(getattr(logging, level_upper))
-    
-    logger.info(f"Log level changed to {level_upper} via API")
-    
+
+    logger.info("log_level_changed_via_api", new_level=level_upper)
+
     return {
         "status": "success",
         "log_level": level_upper,
