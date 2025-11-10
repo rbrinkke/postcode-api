@@ -11,10 +11,13 @@ from typing import Optional, Dict, List
 from statistics import mean, median
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from starlette.types import ASGIApp, Receive, Scope, Send, Message
 import structlog
+
+# Prometheus metrics
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 
 # Import logging configuration
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +27,45 @@ from src.core.config import settings
 # Initialize logging system
 setup_logging(debug=settings.is_debug_mode, json_logs=settings.use_json_logs)
 logger = get_logger(__name__)
+
+# Prometheus Metrics Registry
+prometheus_registry = CollectorRegistry(auto_describe=True)
+
+# Prometheus Metrics
+http_requests_total = Counter(
+    'http_requests_total',
+    'Total HTTP requests',
+    ['service', 'endpoint', 'method', 'status'],
+    registry=prometheus_registry
+)
+
+http_request_duration_seconds = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request duration in seconds',
+    ['service', 'endpoint', 'method'],
+    registry=prometheus_registry
+)
+
+http_requests_active = Gauge(
+    'http_requests_active',
+    'Active HTTP requests',
+    ['service'],
+    registry=prometheus_registry
+)
+
+database_query_duration_seconds = Histogram(
+    'database_query_duration_seconds',
+    'Database query duration in seconds',
+    ['service', 'query_type'],
+    registry=prometheus_registry
+)
+
+postcode_lookups_total = Counter(
+    'postcode_lookups_total',
+    'Total postcode lookups',
+    ['service', 'status'],
+    registry=prometheus_registry
+)
 
 # Metrics Collector - tracks all system and application metrics
 class MetricsCollector:
@@ -231,9 +273,10 @@ class LoggingMiddleware:
         headers = dict(scope.get("headers", []))
         correlation_id = headers.get(b"x-correlation-id", b"").decode() or str(uuid.uuid4())
 
-        # Bind correlation ID to context for all logs in this request
+        # Bind correlation ID and trace_id to context for all logs in this request
         structlog.contextvars.bind_contextvars(
             correlation_id=correlation_id,
+            trace_id=correlation_id,  # Alias for observability stack compatibility
             request_method=method,
             request_path=path
         )
@@ -251,9 +294,10 @@ class LoggingMiddleware:
                 process_time = time.time() - start_time
                 process_time_ms = round(process_time * 1000, 2)
 
-                # Add correlation ID to response headers
+                # Add correlation ID and trace ID to response headers
                 headers_list = list(message.get("headers", []))
                 headers_list.append((b"x-correlation-id", correlation_id.encode()))
+                headers_list.append((b"x-trace-id", correlation_id.encode()))  # Alias for observability stack
                 message["headers"] = headers_list
 
                 if should_log:
@@ -262,8 +306,29 @@ class LoggingMiddleware:
                         method=method,
                         path=path,
                         status_code=status_code,
-                        process_time_ms=process_time_ms
+                        process_time_ms=process_time_ms,
+                        trace_id=correlation_id
                     )
+
+                # Record Prometheus metrics (for all requests except /metrics to avoid recursion)
+                if path != "/metrics":
+                    # Increment active requests counter
+                    http_requests_active.labels(service="postcode-api").set(1)
+
+                    # Record request count
+                    http_requests_total.labels(
+                        service="postcode-api",
+                        endpoint=path,
+                        method=method,
+                        status=status_code
+                    ).inc()
+
+                    # Record request duration
+                    http_request_duration_seconds.labels(
+                        service="postcode-api",
+                        endpoint=path,
+                        method=method
+                    ).observe(process_time)
 
                 # Record metrics for all requests (including health/metrics)
                 # Extract postcode from path if present
@@ -319,17 +384,47 @@ app.add_middleware(LoggingMiddleware)
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint for observability stack"""
     try:
+        # Test database connectivity
+        query_start = time.time()
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute("SELECT 1")
-        return {"status": "healthy", "database": "connected"}
+        query_duration = time.time() - query_start
+
+        # Record database health check metric
+        database_query_duration_seconds.labels(
+            service="postcode-api",
+            query_type="health_check"
+        ).observe(query_duration)
+
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "service": "postcode-api",
+            "database": "connected",
+            "database_response_time_ms": round(query_duration * 1000, 2)
+        }
     except Exception as e:
         logger.error("health_check_failed", error=str(e), db_path=DB_PATH)
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "database": "disconnected", "error": str(e)}
+            content={
+                "status": "unhealthy",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "service": "postcode-api",
+                "database": "disconnected",
+                "error": str(e)
+            }
         )
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus metrics endpoint for observability stack"""
+    return Response(
+        content=generate_latest(prometheus_registry),
+        media_type=CONTENT_TYPE_LATEST
+    )
 
 @app.get("/postcode/{postcode}", response_model=PostcodeResponse)
 async def get_postcode(postcode: str):
@@ -350,36 +445,67 @@ async def get_postcode(postcode: str):
         )
 
     try:
+        # Track database query time
+        query_start = time.time()
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 "SELECT postcode, lat, lon, woonplaats FROM unilabel WHERE postcode = ? LIMIT 1",
                 (postcode,)
             ) as cursor:
                 row = await cursor.fetchone()
+        query_duration = time.time() - query_start
 
-                if not row:
-                    logger.info("postcode_not_found", postcode=postcode)
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Postcode {postcode} not found in database"
-                    )
+        # Record database query metric
+        database_query_duration_seconds.labels(
+            service="postcode-api",
+            query_type="postcode_lookup"
+        ).observe(query_duration)
 
-                logger.info(
-                    "postcode_lookup_success",
-                    postcode=postcode,
-                    lat=row[1],
-                    lon=row[2],
-                    woonplaats=row[3]
-                )
+        if not row:
+            # Record failed lookup
+            postcode_lookups_total.labels(
+                service="postcode-api",
+                status="not_found"
+            ).inc()
 
-                return PostcodeResponse(
-                    postcode=row[0],
-                    lat=row[1],
-                    lon=row[2],
-                    woonplaats=row[3]
-                )
+            logger.info("postcode_not_found", postcode=postcode)
+            raise HTTPException(
+                status_code=404,
+                detail=f"Postcode {postcode} not found in database"
+            )
 
+        # Record successful lookup
+        postcode_lookups_total.labels(
+            service="postcode-api",
+            status="success"
+        ).inc()
+
+        logger.info(
+            "postcode_lookup_success",
+            postcode=postcode,
+            lat=row[1],
+            lon=row[2],
+            woonplaats=row[3],
+            query_duration_ms=round(query_duration * 1000, 2)
+        )
+
+        return PostcodeResponse(
+            postcode=row[0],
+            lat=row[1],
+            lon=row[2],
+            woonplaats=row[3]
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404)
+        raise
     except aiosqlite.Error as e:
+        # Record database error
+        postcode_lookups_total.labels(
+            service="postcode-api",
+            status="database_error"
+        ).inc()
+
         logger.error("database_query_error", error=str(e), postcode=postcode)
         raise HTTPException(
             status_code=500,
