@@ -21,6 +21,7 @@ services:
       loki.collect: "true"
 
     networks:
+      - activity-network
       - activity-observability
 
     logging:
@@ -37,5 +38,7 @@ services:
       start_period: 40s
 
 networks:
+  activity-network:
+    external: true
   activity-observability:
     external: true

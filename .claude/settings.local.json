@@ -16,7 +16,10 @@
       "Bash(docker system:*)",
       "Bash(curl:*)",
       "Bash(docker logs:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
